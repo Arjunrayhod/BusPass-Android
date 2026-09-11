@@ -63,8 +63,41 @@ class MainActivity : ComponentActivity() {
 
       webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-          url?.let { view?.loadUrl(it) }
+          if (url == null) return false
+          if (url.endsWith(".pdf") || url.contains("/api/ticket/pdf/")) {
+            try {
+              val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+              startActivity(intent)
+              return true
+            } catch (e: Exception) {
+              view?.loadUrl(url)
+              return true
+            }
+          }
+          url.let { view?.loadUrl(it) }
           return true
+        }
+      }
+
+      setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+        try {
+          val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+            setMimeType(if (url.contains(".pdf") || mimetype?.contains("pdf") == true) "application/pdf" else mimetype)
+            addRequestHeader("User-Agent", userAgent)
+            setDescription("Downloading CloudBus Pass...")
+            val filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, "application/pdf")
+            setTitle(filename)
+            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, filename)
+          }
+          val dm = getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+          dm.enqueue(request)
+          android.widget.Toast.makeText(applicationContext, "Downloading Pass to Downloads folder...", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+          try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            startActivity(intent)
+          } catch (_: Exception) {}
         }
       }
 
