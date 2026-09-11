@@ -1,17 +1,16 @@
 package com.example
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.os.Bundle
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import androidx.activity.enableEdgeToEdge
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : ComponentActivity() {
   private lateinit var webView: WebView
@@ -19,7 +18,12 @@ class MainActivity : ComponentActivity() {
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    enableEdgeToEdge()
+    
+    // Set matching solid dark status bar to prevent header overlap
+    window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+    window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+    window.statusBarColor = Color.parseColor("#0F172A")
+    window.navigationBarColor = Color.parseColor("#0F172A")
     
     webView = WebView(this).apply {
       layoutParams = ViewGroup.LayoutParams(
@@ -70,12 +74,5 @@ class MainActivity : ComponentActivity() {
         }
       }
     })
-
-    // Handle Edge-to-Edge insets
-    ViewCompat.setOnApplyWindowInsetsListener(webView) { v, insets ->
-      val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-      v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-      insets
-    }
   }
 }
