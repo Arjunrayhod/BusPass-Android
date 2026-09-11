@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
       }
       
       // Load live Vercel frontend (Auto-updating without re-installing APK)
-      loadUrl("https://code-alpha-bus-pass.vercel.app")
+      loadUrl("https://code-alpha-bus-pass-chi.vercel.app")
     }
 
     setContentView(webView)
