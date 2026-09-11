@@ -59,49 +59,92 @@ class MainActivity : ComponentActivity() {
         loadWithOverviewMode = true
         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         mediaPlaybackRequiresUserGesture = false
+        setSupportMultipleWindows(true)
+        javaScriptCanOpenWindowsAutomatically = true
       }
 
       webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+          val url = request?.url?.toString() ?: return false
+          return handleExternalUrl(url, view)
+        }
+
+        @Suppress("DEPRECATION")
         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
           if (url == null) return false
-          if (url.endsWith(".pdf") || url.contains("/api/ticket/pdf/")) {
+          return handleExternalUrl(url, view)
+        }
+
+        private fun handleExternalUrl(url: String, view: WebView?): Boolean {
+          if (url.endsWith(".pdf") || url.contains("/api/ticket/pdf/") || url.contains("download=1") || url.contains("github.com") || url.contains("google.com/maps")) {
             try {
-              val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+              val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+              }
               startActivity(intent)
               return true
             } catch (e: Exception) {
-              view?.loadUrl(url)
-              return true
+              return false
             }
           }
-          url.let { view?.loadUrl(it) }
-          return true
+          return false
         }
       }
 
       setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
         try {
-          val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
-            setMimeType(if (url.contains(".pdf") || mimetype?.contains("pdf") == true) "application/pdf" else mimetype)
-            addRequestHeader("User-Agent", userAgent)
-            setDescription("Downloading CloudBus Pass...")
-            val filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, "application/pdf")
-            setTitle(filename)
-            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, filename)
+          val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            addCategory(android.content.Intent.CATEGORY_BROWSABLE)
           }
-          val dm = getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-          dm.enqueue(request)
-          android.widget.Toast.makeText(applicationContext, "Downloading Pass to Downloads folder...", android.widget.Toast.LENGTH_SHORT).show()
+          startActivity(intent)
         } catch (e: Exception) {
           try {
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-            startActivity(intent)
+            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+              setMimeType(if (url.contains(".pdf") || mimetype?.contains("pdf") == true) "application/pdf" else mimetype)
+              addRequestHeader("User-Agent", userAgent)
+              setDescription("Downloading CloudBus Pass...")
+              val filename = android.webkit.URLUtil.guessFileName(url, contentDisposition, "application/pdf")
+              setTitle(filename)
+              setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+              setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, filename)
+            }
+            val dm = getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+            dm.enqueue(request)
+            android.widget.Toast.makeText(applicationContext, "Downloading Pass...", android.widget.Toast.LENGTH_SHORT).show()
           } catch (_: Exception) {}
         }
       }
 
       webChromeClient = object : WebChromeClient() {
+        override fun onCreateWindow(
+          view: WebView?,
+          isDialog: Boolean,
+          isUserGesture: Boolean,
+          resultMsg: android.os.Message?
+        ): Boolean {
+          val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+          val tempWebView = WebView(this@MainActivity).apply {
+            webViewClient = object : WebViewClient() {
+              override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                val url = request?.url?.toString() ?: return false
+                try {
+                  val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                  }
+                  startActivity(intent)
+                } catch (_: Exception) {}
+                return true
+              }
+            }
+          }
+          transport.webView = tempWebView
+          resultMsg.sendToTarget()
+          return true
+        }
+
         override fun onPermissionRequest(request: PermissionRequest?) {
           request?.let { permReq ->
             val requestedResources = permReq.resources
