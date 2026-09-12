@@ -109,11 +109,19 @@ class MainActivity : ComponentActivity() {
         }
 
         private fun handleExternalUrl(url: String, view: WebView?): Boolean {
-          if (url.endsWith(".pdf") || url.contains("/api/ticket/pdf/") || url.contains("download=1") || url.contains("github.com") || url.contains("google.com/maps")) {
+          val appHost = "code-alpha-bus-pass-chi.vercel.app"
+          val isExternal = !url.contains(appHost) && !url.startsWith("file://") && !url.contains("localhost")
+          val isFileOrMedia = url.endsWith(".pdf") || url.contains("/api/ticket/pdf/") || url.contains("download=1")
+          val isSocialOrExternal = url.contains("linkedin.com") || url.contains("github.com") || 
+                                   url.contains("google.com/maps") || url.contains("instagram.com") || 
+                                   url.contains("twitter.com") || url.contains("x.com") ||
+                                   url.startsWith("mailto:") || url.startsWith("tel:")
+
+          if (isExternal || isFileOrMedia || isSocialOrExternal) {
             try {
-              val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+              val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addCategory(Intent.CATEGORY_BROWSABLE)
               }
               startActivity(intent)
               return true
@@ -127,14 +135,14 @@ class MainActivity : ComponentActivity() {
 
       setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
         try {
-          val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+          val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addCategory(Intent.CATEGORY_BROWSABLE)
           }
           startActivity(intent)
         } catch (e: Exception) {
           try {
-            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+            val request = android.app.DownloadManager.Request(Uri.parse(url)).apply {
               setMimeType(if (url.contains(".pdf") || mimetype?.contains("pdf") == true) "application/pdf" else mimetype)
               addRequestHeader("User-Agent", userAgent)
               setDescription("Downloading CloudBus Pass...")
@@ -162,10 +170,20 @@ class MainActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
               override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
+                return openExternal(url)
+              }
+
+              @Suppress("DEPRECATION")
+              override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                if (url == null) return false
+                return openExternal(url)
+              }
+
+              private fun openExternal(targetUrl: String): Boolean {
                 try {
-                  val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                  val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addCategory(Intent.CATEGORY_BROWSABLE)
                   }
                   startActivity(intent)
                 } catch (_: Exception) {}
