@@ -2,12 +2,15 @@ package com.example
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -20,21 +23,51 @@ import androidx.core.content.ContextCompat
 class MainActivity : ComponentActivity() {
   private lateinit var webView: WebView
   private var pendingPermissionRequest: PermissionRequest? = null
+  private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
 
   private val requestCameraPermissionLauncher = registerForActivityResult(
     ActivityResultContracts.RequestPermission()
   ) { isGranted: Boolean ->
-    if (isGranted) {
-      pendingPermissionRequest?.grant(pendingPermissionRequest?.resources)
-    } else {
-      pendingPermissionRequest?.deny()
+    runOnUiThread {
+      if (isGranted) {
+        pendingPermissionRequest?.let { req ->
+          req.grant(req.resources)
+        }
+      } else {
+        pendingPermissionRequest?.deny()
+      }
+      pendingPermissionRequest = null
     }
-    pendingPermissionRequest = null
+  }
+
+  private val fileChooserLauncher = registerForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+  ) { result ->
+    if (result.resultCode == RESULT_OK) {
+      val intent = result.data
+      val uris = when {
+        intent?.clipData != null -> {
+          val count = intent.clipData!!.itemCount
+          Array(count) { i -> intent.clipData!!.getItemAt(i).uri }
+        }
+        intent?.data != null -> arrayOf(intent.data!!)
+        else -> null
+      }
+      fileUploadCallback?.onReceiveValue(uris)
+    } else {
+      fileUploadCallback?.onReceiveValue(null)
+    }
+    fileUploadCallback = null
   }
 
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    
+    // Check and request camera permission upfront if needed
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+      requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
     
     // Set matching solid dark status bar to prevent header overlap
     window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
@@ -146,20 +179,44 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onPermissionRequest(request: PermissionRequest?) {
-          request?.let { permReq ->
-            val requestedResources = permReq.resources
-            val needsCamera = requestedResources.any { it == PermissionRequest.RESOURCE_VIDEO_CAPTURE }
-            
-            if (needsCamera) {
-              if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                permReq.grant(requestedResources)
+          runOnUiThread {
+            request?.let { permReq ->
+              val requestedResources = permReq.resources
+              val needsCamera = requestedResources.any { it == PermissionRequest.RESOURCE_VIDEO_CAPTURE }
+              
+              if (needsCamera) {
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                  permReq.grant(requestedResources)
+                } else {
+                  pendingPermissionRequest = permReq
+                  requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
               } else {
-                pendingPermissionRequest = permReq
-                requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                permReq.grant(requestedResources)
               }
-            } else {
-              permReq.grant(requestedResources)
             }
+          }
+        }
+
+        override fun onShowFileChooser(
+          webView: WebView?,
+          filePathCallback: ValueCallback<Array<Uri>>?,
+          fileChooserParams: FileChooserParams?
+        ): Boolean {
+          fileUploadCallback?.onReceiveValue(null)
+          fileUploadCallback = filePathCallback
+
+          try {
+            val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+              addCategory(Intent.CATEGORY_OPENABLE)
+              type = "image/*"
+            }
+            fileChooserLauncher.launch(intent)
+            return true
+          } catch (e: Exception) {
+            fileUploadCallback?.onReceiveValue(null)
+            fileUploadCallback = null
+            return false
           }
         }
 
