@@ -1,0 +1,29 @@
+﻿{
+  "project_info": {
+    "project_number": "447175969197",
+    "project_id": "cloudbus-49132",
+    "storage_bucket": "cloudbus-49132.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:447175969197:android:c7ab2cb6df7cc828857924",
+        "android_client_info": {
+          "package_name": "com.example"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCFy871slGw4qNWywx76BaIWpHrnQZIxo0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
