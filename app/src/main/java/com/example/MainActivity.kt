@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
         val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         val request = Request.Builder()
-          .url("https://else-decision-dust-asylum.trycloudflare.com/api/fcm/register-token")
+          .url("https://cloudbus-backend.onrender.com/api/fcm/register-token")
           .addHeader("Authorization", "Bearer $authToken")
           .post(body)
           .build()
