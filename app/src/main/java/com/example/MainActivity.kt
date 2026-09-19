@@ -231,6 +231,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
       }
     }
+
+    // Start Background Booking Monitor Service (runs even when app is closed)
+    try {
+      val serviceIntent = Intent(this, BackgroundBookingService::class.java)
+      startService(serviceIntent)
+    } catch (e: Exception) {
+      android.util.Log.e("Service", "Failed to start background service: ${e.message}")
+    }
     
     // Set matching solid dark status bar to prevent header overlap
     window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
