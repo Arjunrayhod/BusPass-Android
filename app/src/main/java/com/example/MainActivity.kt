@@ -2,13 +2,23 @@ package com.example
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -18,12 +28,21 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   private lateinit var webView: WebView
   private var pendingPermissionRequest: PermissionRequest? = null
   private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
+  private var tts: TextToSpeech? = null
+  private var isTtsReady = false
+
+  companion object {
+    const val CHANNEL_ID = "cloudbus_admin_channel"
+    const val CHANNEL_NAME = "CloudBus Booking & Alerts"
+  }
 
   private val requestCameraPermissionLauncher = registerForActivityResult(
     ActivityResultContracts.RequestPermission()
@@ -38,6 +57,12 @@ class MainActivity : ComponentActivity() {
       }
       pendingPermissionRequest = null
     }
+  }
+
+  private val requestNotificationPermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission()
+  ) { isGranted: Boolean ->
+    android.util.Log.d("NotificationPermission", "Granted: $isGranted")
   }
 
   private val fileChooserLauncher = registerForActivityResult(
@@ -60,13 +85,151 @@ class MainActivity : ComponentActivity() {
     fileUploadCallback = null
   }
 
+  override fun onInit(status: Int) {
+    if (status == TextToSpeech.SUCCESS) {
+      val result = tts?.setLanguage(Locale("hi", "IN"))
+      if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+        tts?.setLanguage(Locale.US)
+      }
+      isTtsReady = true
+      android.util.Log.d("TTS", "TextToSpeech initialized successfully")
+    } else {
+      android.util.Log.e("TTS", "TextToSpeech initialization failed: $status")
+    }
+  }
+
+  private fun createNotificationChannel() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val channel = NotificationChannel(
+        CHANNEL_ID,
+        CHANNEL_NAME,
+        NotificationManager.IMPORTANCE_HIGH
+      ).apply {
+        description = "Instant notifications for new ticket bookings and admin alerts"
+        enableLights(true)
+        lightColor = Color.BLUE
+        enableVibration(true)
+        vibrationPattern = longArrayOf(0, 250, 150, 250)
+      }
+      val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      notificationManager.createNotificationChannel(channel)
+    }
+  }
+
+  private fun vibratePhone(durationMs: Long) {
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+        vibratorManager?.defaultVibrator?.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+      } else {
+        @Suppress("DEPRECATION")
+        val v = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          v?.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+          v?.vibrate(durationMs)
+        }
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("Vibrator", "Vibration error: ${e.message}")
+    }
+  }
+
+  inner class AndroidBridge {
+    @JavascriptInterface
+    fun isAndroid(): Boolean = true
+
+    @JavascriptInterface
+    fun speak(text: String, lang: String?) {
+      runOnUiThread {
+        if (!isTtsReady || tts == null) return@runOnUiThread
+        try {
+          val locale = when (lang?.lowercase()) {
+            "hi", "hi-in", "hindi" -> Locale("hi", "IN")
+            else -> Locale.US
+          }
+          val result = tts?.setLanguage(locale)
+          if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts?.setLanguage(Locale.US)
+          }
+          tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "UTTERANCE_ID_${System.currentTimeMillis()}")
+        } catch (e: Exception) {
+          android.util.Log.e("TTS", "Speak error: ${e.message}")
+        }
+      }
+    }
+
+    @JavascriptInterface
+    fun stopSpeaking() {
+      runOnUiThread {
+        tts?.stop()
+      }
+    }
+
+    @JavascriptInterface
+    fun showNotification(title: String, message: String, tag: String?) {
+      runOnUiThread {
+        try {
+          val intent = Intent(this@MainActivity, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+          }
+          val pendingIntent = PendingIntent.getActivity(
+            this@MainActivity,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+          )
+
+          val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+          val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+          val notifId = (System.currentTimeMillis() % 100000).toInt()
+          notificationManager.notify(notifId, notification)
+
+          vibratePhone(250)
+        } catch (e: Exception) {
+          android.util.Log.e("Notification", "Show notification error: ${e.message}")
+        }
+      }
+    }
+
+    @JavascriptInterface
+    fun vibrate(durationMs: Long) {
+      runOnUiThread {
+        vibratePhone(durationMs)
+      }
+    }
+  }
+
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+
+    // Initialize Notification Channel
+    createNotificationChannel()
+
+    // Initialize Text-To-Speech
+    tts = TextToSpeech(this, this)
     
     // Check and request camera permission upfront if needed
     if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
       requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // Check and request notification permission for Android 13+ (API 33)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+      }
     }
     
     // Set matching solid dark status bar to prevent header overlap
@@ -95,6 +258,9 @@ class MainActivity : ComponentActivity() {
         setSupportMultipleWindows(true)
         javaScriptCanOpenWindowsAutomatically = true
       }
+
+      // Add Native Android Bridge for Voice Assistant and Notifications
+      addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
       webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
@@ -261,6 +427,12 @@ class MainActivity : ComponentActivity() {
         }
       }
     })
+  }
+
+  override fun onDestroy() {
+    tts?.stop()
+    tts?.shutdown()
+    super.onDestroy()
   }
 }
 
