@@ -30,6 +30,15 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
@@ -38,10 +47,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
   private var tts: TextToSpeech? = null
   private var isTtsReady = false
+  private var currentFcmToken: String = ""
 
   companion object {
-    const val CHANNEL_ID = "cloudbus_admin_channel"
-    const val CHANNEL_NAME = "CloudBus Booking & Alerts"
+    const val CHANNEL_ID = "admin_booking_notifications"
+    const val CHANNEL_NAME = "New Booking Notifications"
   }
 
   private val requestCameraPermissionLauncher = registerForActivityResult(
@@ -203,9 +213,63 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     @JavascriptInterface
+    fun getFcmToken(): String = currentFcmToken
+
+    @JavascriptInterface
+    fun saveAuthToken(authToken: String) {
+      if (authToken.isNotEmpty()) {
+        val prefs = getSharedPreferences(MyFirebaseMessagingService.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(MyFirebaseMessagingService.KEY_AUTH_TOKEN, authToken).apply()
+        if (currentFcmToken.isNotEmpty()) {
+          syncFcmTokenWithBackend(currentFcmToken, authToken)
+        }
+      }
+    }
+
+    @JavascriptInterface
     fun vibrate(durationMs: Long) {
       runOnUiThread {
         vibratePhone(durationMs)
+      }
+    }
+  }
+
+  private fun syncFcmTokenWithBackend(fcmToken: String, authToken: String) {
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        val client = OkHttpClient()
+        val json = JSONObject().apply {
+          put("fcm_token", fcmToken)
+          put("device_name", "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})")
+        }
+        val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = Request.Builder()
+          .url("https://else-decision-dust-asylum.trycloudflare.com/api/fcm/register-token")
+          .addHeader("Authorization", "Bearer $authToken")
+          .post(body)
+          .build()
+
+        client.newCall(request).execute().use { response ->
+          android.util.Log.d("MainActivity", "FCM token register response: ${response.code}")
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "FCM sync error: ${e.message}")
+      }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    handleNotificationIntent(intent)
+  }
+
+  private fun handleNotificationIntent(intent: Intent?) {
+    val bookingId = intent?.getStringExtra("booking_id")
+    if (!bookingId.isNullOrEmpty()) {
+      val targetUrl = "https://code-alpha-bus-pass-chi.vercel.app/?view=admin&booking_id=$bookingId"
+      runOnUiThread {
+        webView.loadUrl(targetUrl)
       }
     }
   }
@@ -219,6 +283,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     // Initialize Text-To-Speech
     tts = TextToSpeech(this, this)
+
+    // Retrieve FCM Token
+    try {
+      FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+        if (task.isSuccessful && task.result != null) {
+          currentFcmToken = task.result
+          val prefs = getSharedPreferences(MyFirebaseMessagingService.PREFS_NAME, Context.MODE_PRIVATE)
+          prefs.edit().putString(MyFirebaseMessagingService.KEY_FCM_TOKEN, currentFcmToken).apply()
+          android.util.Log.d("MainActivity", "FCM Token: $currentFcmToken")
+
+          val savedAuth = prefs.getString(MyFirebaseMessagingService.KEY_AUTH_TOKEN, null)
+          if (!savedAuth.isNullOrEmpty()) {
+            syncFcmTokenWithBackend(currentFcmToken, savedAuth)
+          }
+        }
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("MainActivity", "FCM init error: ${e.message}")
+    }
     
     // Check and request camera permission upfront if needed
     if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -230,14 +313,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
       if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
         requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
       }
-    }
-
-    // Start Background Booking Monitor Service (runs even when app is closed)
-    try {
-      val serviceIntent = Intent(this, BackgroundBookingService::class.java)
-      startService(serviceIntent)
-    } catch (e: Exception) {
-      android.util.Log.e("Service", "Failed to start background service: ${e.message}")
     }
     
     // Set matching solid dark status bar to prevent header overlap
